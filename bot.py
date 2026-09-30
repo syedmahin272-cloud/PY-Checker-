@@ -24,7 +24,7 @@ SETTINGS_FILE = "settings.json"
 bot = telebot.TeleBot(BOT_TOKEN)
 app = Flask(__name__)
 
-user_buffers = {} # Smart Batching er jonno buffer
+user_buffers = {} 
 
 # --- DATABASE HANDLING ---
 def load_json(file_name):
@@ -67,6 +67,7 @@ def get_user_settings(user_id):
     if isinstance(user_data, str): 
         user_data = {"format": user_data}
     if "format" not in user_data: user_data["format"] = "text"
+    if "view_mode" not in user_data: user_data["view_mode"] = "all"
     if "last_bonus" not in user_data: user_data["last_bonus"] = ""
     return user_data
 
@@ -179,9 +180,11 @@ def start_cmd(message):
 def profile_handler(message):
     pts = get_points(message.from_user.id)
     pts_text = "Unlimited" if pts == float('inf') else f"{pts}"
-    output_format = get_user_settings(message.from_user.id)["format"]
-    fmt_str = "Text Message" if output_format == "text" else ".txt File"
-    bot.send_message(message.chat.id, f"👤 **Profile**\n\n🆔 ID: `{message.from_user.id}`\n💰 Balance: **{pts_text}**\n⚙️ Output: **{fmt_str}**", parse_mode="Markdown")
+    settings = get_user_settings(message.from_user.id)
+    fmt_str = "Text Message" if settings["format"] == "text" else ".txt File"
+    view_str = "Fresh Only" if settings["view_mode"] == "fresh" else "Show All"
+    
+    bot.send_message(message.chat.id, f"👤 **Profile**\n\n🆔 ID: `{message.from_user.id}`\n💰 Balance: **{pts_text}**\n⚙️ Output: **{fmt_str}**\n👁️ View: **{view_str}**", parse_mode="Markdown")
 
 @bot.message_handler(func=lambda message: message.text == "🎁 Daily Bonus")
 def daily_bonus_handler(message):
@@ -196,24 +199,45 @@ def daily_bonus_handler(message):
         add_points(user_id, 5)
         bot.send_message(message.chat.id, "🎉 **Success!**\nTumi ajker 5ti FREE check point peyecho!", parse_mode="Markdown")
 
+# --- SETTINGS MENU ---
+def send_settings_menu(chat_id, user_id, message_id=None):
+    settings = get_user_settings(user_id)
+    fmt = settings["format"]
+    view = settings["view_mode"]
+    
+    markup = InlineKeyboardMarkup(row_width=2)
+    # Row 1: Format
+    markup.add(
+        InlineKeyboardButton(text=f"{'🔘 ' if fmt == 'text' else ''}Text", callback_data="cfg_fmt_text"),
+        InlineKeyboardButton(text=f"{'🔘 ' if fmt == 'file' else ''}File", callback_data="cfg_fmt_file")
+    )
+    # Row 2: View Mode
+    markup.add(
+        InlineKeyboardButton(text=f"{'🔘 ' if view == 'all' else ''}Show All", callback_data="cfg_view_all"),
+        InlineKeyboardButton(text=f"{'🔘 ' if view == 'fresh' else ''}Fresh Only", callback_data="cfg_view_fresh")
+    )
+    
+    text = "**⚙️ Configuration Menu**\nConfigure how you want to receive results:"
+    
+    if message_id:
+        bot.edit_message_text(text, chat_id=chat_id, message_id=message_id, reply_markup=markup, parse_mode="Markdown")
+    else:
+        bot.send_message(chat_id, text, reply_markup=markup, parse_mode="Markdown")
+
 @bot.message_handler(func=lambda message: message.text == "⚙️ Output Settings")
 def settings_handler(message):
-    current = get_user_settings(message.from_user.id)["format"]
-    markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton(text=f"{'✅ ' if current == 'text' else ''}Text Message", callback_data="setfmt_text"), 
-               InlineKeyboardButton(text=f"{'✅ ' if current == 'file' else ''}.txt File", callback_data="setfmt_file"))
-    bot.send_message(message.chat.id, "Select output format:", reply_markup=markup)
+    send_settings_menu(message.chat.id, message.from_user.id)
 
-@bot.callback_query_handler(func=lambda call: call.data.startswith("setfmt_"))
-def callback_format(call):
-    new_fmt = call.data.split("_")[1]
+@bot.callback_query_handler(func=lambda call: call.data.startswith("cfg_"))
+def callback_config(call):
+    action, key, val = call.data.split("_")
     settings = get_user_settings(call.from_user.id)
-    settings["format"] = new_fmt
+    
+    if key == "fmt": settings["format"] = val
+    elif key == "view": settings["view_mode"] = val
+        
     save_user_settings(call.from_user.id, settings)
-    markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton(text=f"{'✅ ' if new_fmt == 'text' else ''}Text Message", callback_data="setfmt_text"),
-               InlineKeyboardButton(text=f"{'✅ ' if new_fmt == 'file' else ''}.txt File", callback_data="setfmt_file"))
-    bot.edit_message_reply_markup(call.message.chat.id, call.message.message_id, reply_markup=markup)
+    send_settings_menu(call.message.chat.id, call.from_user.id, call.message.message_id)
 
 @bot.message_handler(func=lambda message: message.text == "💸 Send Points")
 def sendpoints_handler(message):
@@ -236,7 +260,9 @@ def process_send_points(message):
 
 # --- CHECKING HANDLERS & SMART BATCHING ---
 def send_results(chat_id, user_id, results, loading_msg_id=None):
-    pref = get_user_settings(user_id)["format"]
+    settings = get_user_settings(user_id)
+    pref = settings["format"]
+    view_mode = settings["view_mode"]
     
     total = len(results)
     fresh_count = sum(1 for status in results.values() if "✅" in status)
@@ -245,9 +271,13 @@ def send_results(chat_id, user_id, results, loading_msg_id=None):
     # Ultra-Minimal Professional Formatting
     output_text = "**System Report**\n"
     output_text += "━━━━━━━━━━━━━━━━━━━━\n"
-    output_text += f"Total: {total}  |  Fresh: {fresh_count}  |  Bad: {bad_count}\n\n"
+    output_text += f"Total: {total}  |  Fresh: {fresh_count}  |  Bad: {bad_count}\n"
+    if view_mode == "fresh": output_text += "*(Filter: Fresh Only)*\n"
+    output_text += "\n"
     
     prev_was_fresh = None
+    displayed_count = 0
+    
     for num, status in results.items(): 
         if "✅" in status: indicator = "✅"
         elif "🚫" in status: indicator = "🚫"
@@ -255,11 +285,21 @@ def send_results(chat_id, user_id, results, loading_msg_id=None):
         else: indicator = "❌"
         
         is_fresh = (indicator == "✅")
-        if prev_was_fresh is True and not is_fresh:
+        
+        # Apply filter logic
+        if view_mode == "fresh" and not is_fresh:
+            continue
+            
+        # Add blank line between fresh and bad (only in 'all' view)
+        if view_mode == "all" and prev_was_fresh is True and not is_fresh:
             output_text += "\n"
             
         output_text += f"`{num}`  {indicator}\n"
         prev_was_fresh = is_fresh
+        displayed_count += 1
+        
+    if displayed_count == 0:
+        output_text += "*(No numbers match the current filter)*\n"
         
     output_text += "\n━━━━━━━━━━━━━━━━━━━━\n"
     pts = get_points(user_id)
@@ -275,13 +315,19 @@ def send_results(chat_id, user_id, results, loading_msg_id=None):
         with open(fname, "w", encoding="utf-8") as f:
             f.write("SYSTEM REPORT\n")
             f.write("--------------------------\n")
-            f.write(f"Total: {total} | Fresh: {fresh_count} | Bad: {bad_count}\n\n")
+            f.write(f"Total: {total} | Fresh: {fresh_count} | Bad: {bad_count}\n")
+            if view_mode == "fresh": f.write("(Filter: Fresh Only)\n")
+            f.write("\n")
             
             file_prev_fresh = None
             for num, status in results.items():
                 is_fresh = ("✅" in status)
-                if file_prev_fresh is True and not is_fresh:
+                
+                if view_mode == "fresh" and not is_fresh: continue
+                
+                if view_mode == "all" and file_prev_fresh is True and not is_fresh:
                     f.write("\n")
+                    
                 if "✅" in status: c_status = "[FRESH]"
                 elif "🚫" in status: c_status = "[BANNED]"
                 elif "🔒" in status: c_status = "[LOCKED]"
