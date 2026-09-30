@@ -236,22 +236,69 @@ def process_send_points(message):
 # --- CHECKING HANDLERS & SMART BATCHING ---
 def send_results(chat_id, user_id, results, loading_msg_id=None):
     pref = get_user_settings(user_id)["format"]
-    output_text = "📊 **Checker Results:**\n\n"
-    for num, status in results.items(): output_text += f"`{num}` ➔ {status}\n"
-    output_text += f"\n💰 Points remaining: {get_points(user_id)}"
+    
+    # Calculate Stats
+    total = len(results)
+    fresh_count = sum(1 for status in results.values() if "✅" in status)
+    bad_count = total - fresh_count
+    
+    # Ultra-Minimal Professional Formatting
+    output_text = "**System Report**\n"
+    output_text += "━━━━━━━━━━━━━━━━━━━━\n"
+    output_text += f"Total: {total}  |  Fresh: {fresh_count}  |  Bad: {bad_count}\n\n"
+    
+    prev_was_fresh = None
+    
+    for num, status in results.items(): 
+        # Clean single emoji indicator
+        if "✅" in status: indicator = "✅"
+        elif "🚫" in status: indicator = "🚫"
+        elif "🔒" in status: indicator = "🔒"
+        else: indicator = "❌"
+        
+        is_fresh = (indicator == "✅")
+        
+        # Professional spacing between Fresh and Bad
+        if prev_was_fresh is True and not is_fresh:
+            output_text += "\n"
+            
+        output_text += f"`{num}`  {indicator}\n"
+        prev_was_fresh = is_fresh
+        
+    output_text += "\n━━━━━━━━━━━━━━━━━━━━\n"
+    pts = get_points(user_id)
+    pts_text = "Unlimited" if pts == float('inf') else f"{pts}"
+    output_text += f"Balance: {pts_text}"
     
     if loading_msg_id:
         try: bot.delete_message(chat_id, loading_msg_id)
         except: pass
 
+    # File output handling (Clean TXT)
     if pref == "file" or len(output_text) > 4000:
         fname = f"result_{user_id}_{int(time.time())}.txt"
         with open(fname, "w", encoding="utf-8") as f:
-            f.write("--- Premium Checker Results ---\nFresh numbers are at the top!\n\n")
+            f.write("SYSTEM REPORT\n")
+            f.write("--------------------------\n")
+            f.write(f"Total: {total} | Fresh: {fresh_count} | Bad: {bad_count}\n\n")
+            
+            file_prev_fresh = None
             for num, status in results.items():
-                f.write(f"{num} - {status.replace('✅', '[FRESH]').replace('❌', '[REG]').replace('🔒', '[LOCK]').replace('🚫', '[BAN]').replace('⚠️', '[ERR]')}\n")
+                is_fresh = ("✅" in status)
+                if file_prev_fresh is True and not is_fresh:
+                    f.write("\n")
+                
+                # Clean text tags for file
+                if "✅" in status: c_status = "[FRESH]"
+                elif "🚫" in status: c_status = "[BANNED]"
+                elif "🔒" in status: c_status = "[LOCKED]"
+                else: c_status = "[REG]"
+                
+                f.write(f"{num}  {c_status}\n")
+                file_prev_fresh = is_fresh
+                
         with open(fname, "rb") as f:
-            bot.send_document(chat_id, f, caption=f"✅ Checking complete!\n💰 Points remaining: {get_points(user_id)}")
+            bot.send_document(chat_id, f, caption=f"**Report Generated**\nTotal: {total} | Fresh: {fresh_count}\nBalance: {pts_text}", parse_mode="Markdown")
         os.remove(fname)
     else:
         bot.send_message(chat_id, output_text, parse_mode="Markdown")
