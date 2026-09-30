@@ -109,7 +109,7 @@ def process_batch(numbers):
                     else:
                         results[num] = "⚠️ Check Failed"
             else:
-                for num in sanitized: results[num] = "⚠️️ API Error"
+                for num in sanitized: results[num] = "⚠ API Error"
         else:
             for num in sanitized: results[num] = "⚠ Connection Error"
     except:
@@ -121,7 +121,8 @@ def bulk_check(numbers):
     for i in range(0, len(numbers), 10):
         chunk = numbers[i:i+10]
         all_results.update(process_batch(chunk))
-    return dict(sorted(all_results.items(), key=lambda item: 0 if "✅ Fresh" in item[1] else 1))
+    # Sort: Fresh at top
+    return dict(sorted(all_results.items(), key=lambda item: 0 if "✅" in item[1] else 1))
 
 def extract_numbers(text):
     return re.findall(r'\+?\d{7,15}', text)
@@ -147,7 +148,7 @@ def broadcast_cmd(message):
         try:
             bot.send_message(uid, f"📢 **Announcement:**\n\n{msg_text}", parse_mode="Markdown")
             success += 1
-            time.sleep(0.05) # Prevent flood limit
+            time.sleep(0.05)
         except:
             failed += 1
     bot.send_message(message.chat.id, f"✅ Broadcast Complete!\nSent: {success} | Failed: {failed}")
@@ -161,7 +162,8 @@ def addpoint_cmd(message):
         target_id, amount = int(args[1]), int(args[2])
         add_points(target_id, amount)
         bot.send_message(message.chat.id, f"✅ Added {amount} points to `{target_id}`.", parse_mode="Markdown")
-        bot.send_message(target_id, f"🎉 Admin {ADMIN_USERNAME} added {amount} points to your account!", parse_mode="Markdown")
+        try: bot.send_message(target_id, f"🎉 Admin {ADMIN_USERNAME} added {amount} points to your account!", parse_mode="Markdown")
+        except: pass
     except: pass
 
 # --- MENU HANDLERS ---
@@ -169,18 +171,17 @@ def addpoint_cmd(message):
 def start_cmd(message):
     pts = get_points(message.from_user.id)
     pts_text = "Unlimited (Admin)" if pts == float('inf') else f"{pts}"
-    text = f"🚀 **Premium Telegram Number Checker**\n\n👤 Your ID: `{message.from_user.id}`\n💰 Your Points: **{pts_text}**\n\n📝 **How to use:**\nJust send me numbers directly or upload a `.txt` file!\n*(Cost: 1 Point per number)*\n\n👨‍💻 Admin: {ADMIN_USERNAME}"
-    # New user checking (ensure they are in DB)
+    text = f"🚀 **Telegram Number Checker**\n\n👤 ID: `{message.from_user.id}`\n💰 Balance: **{pts_text}**\n\n📝 **How to use:**\nSend me numbers directly or upload a `.txt` file.\n*(Cost: 1 Point per check)*\n\n👨‍💻 Admin: {ADMIN_USERNAME}"
     if str(message.from_user.id) not in db: add_points(message.from_user.id, 0)
     bot.send_message(message.chat.id, text, reply_markup=get_main_menu(), parse_mode="Markdown")
 
 @bot.message_handler(func=lambda message: message.text == "👤 Profile")
 def profile_handler(message):
     pts = get_points(message.from_user.id)
-    pts_text = "Unlimited 👑" if pts == float('inf') else f"{pts}"
+    pts_text = "Unlimited" if pts == float('inf') else f"{pts}"
     output_format = get_user_settings(message.from_user.id)["format"]
-    fmt_str = "Text Message 📄" if output_format == "text" else ".txt File 📁"
-    bot.send_message(message.chat.id, f"👤 **User Profile**\n\n🆔 ID: `{message.from_user.id}`\n💰 Balance: **{pts_text} Points**\n⚙️ Output Format: **{fmt_str}**", parse_mode="Markdown")
+    fmt_str = "Text Message" if output_format == "text" else ".txt File"
+    bot.send_message(message.chat.id, f"👤 **Profile**\n\n🆔 ID: `{message.from_user.id}`\n💰 Balance: **{pts_text}**\n⚙️ Output: **{fmt_str}**", parse_mode="Markdown")
 
 @bot.message_handler(func=lambda message: message.text == "🎁 Daily Bonus")
 def daily_bonus_handler(message):
@@ -188,12 +189,12 @@ def daily_bonus_handler(message):
     settings = get_user_settings(user_id)
     today = str(date.today())
     if settings["last_bonus"] == today:
-        bot.send_message(message.chat.id, "⚠️ Tumi ajker bonus already niye niyecho. Agamikal abar try koro!")
+        bot.send_message(message.chat.id, "⚠️ Tumi ajker bonus already niyecho. Agamikal abar try koro!")
     else:
         settings["last_bonus"] = today
         save_user_settings(user_id, settings)
         add_points(user_id, 5)
-        bot.send_message(message.chat.id, "🎉 **Congratulations!**\nTumi ajker 5ti FREE Check point peyecho!", parse_mode="Markdown")
+        bot.send_message(message.chat.id, "🎉 **Success!**\nTumi ajker 5ti FREE check point peyecho!", parse_mode="Markdown")
 
 @bot.message_handler(func=lambda message: message.text == "⚙️ Output Settings")
 def settings_handler(message):
@@ -201,7 +202,7 @@ def settings_handler(message):
     markup = InlineKeyboardMarkup()
     markup.add(InlineKeyboardButton(text=f"{'✅ ' if current == 'text' else ''}Text Message", callback_data="setfmt_text"), 
                InlineKeyboardButton(text=f"{'✅ ' if current == 'file' else ''}.txt File", callback_data="setfmt_file"))
-    bot.send_message(message.chat.id, "Select how you want to receive your checker results:", reply_markup=markup)
+    bot.send_message(message.chat.id, "Select output format:", reply_markup=markup)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith("setfmt_"))
 def callback_format(call):
@@ -216,7 +217,7 @@ def callback_format(call):
 
 @bot.message_handler(func=lambda message: message.text == "💸 Send Points")
 def sendpoints_handler(message):
-    msg = bot.send_message(message.chat.id, "Please send the Target User ID and Amount separated by space.\nExample: `123456789 50`", parse_mode="Markdown")
+    msg = bot.send_message(message.chat.id, "Target User ID and Amount separated by space.\nExample: `123456789 50`", parse_mode="Markdown")
     bot.register_next_step_handler(msg, lambda m: process_send_points(m))
 
 def process_send_points(message):
@@ -227,17 +228,16 @@ def process_send_points(message):
         if amount <= 0: return bot.send_message(message.chat.id, "Amount must be > 0.")
         if deduct_points(user_id, amount):
             add_points(target_id, amount)
-            bot.send_message(message.chat.id, f"✅ Successfully sent {amount} points to `{target_id}`.", parse_mode="Markdown")
-            try: bot.send_message(target_id, f"💸 You received {amount} points from ID `{user_id}`!", parse_mode="Markdown")
+            bot.send_message(message.chat.id, f"✅ Sent {amount} points to `{target_id}`.", parse_mode="Markdown")
+            try: bot.send_message(target_id, f"💸 Received {amount} points from ID `{user_id}`!", parse_mode="Markdown")
             except: pass
-        else: bot.send_message(message.chat.id, "❌ Not enough points in your balance.")
+        else: bot.send_message(message.chat.id, "❌ Not enough balance.")
     except: bot.send_message(message.chat.id, "⚠️ Error: Invalid numbers.")
 
 # --- CHECKING HANDLERS & SMART BATCHING ---
 def send_results(chat_id, user_id, results, loading_msg_id=None):
     pref = get_user_settings(user_id)["format"]
     
-    # Calculate Stats
     total = len(results)
     fresh_count = sum(1 for status in results.values() if "✅" in status)
     bad_count = total - fresh_count
@@ -248,17 +248,13 @@ def send_results(chat_id, user_id, results, loading_msg_id=None):
     output_text += f"Total: {total}  |  Fresh: {fresh_count}  |  Bad: {bad_count}\n\n"
     
     prev_was_fresh = None
-    
     for num, status in results.items(): 
-        # Clean single emoji indicator
         if "✅" in status: indicator = "✅"
         elif "🚫" in status: indicator = "🚫"
         elif "🔒" in status: indicator = "🔒"
         else: indicator = "❌"
         
         is_fresh = (indicator == "✅")
-        
-        # Professional spacing between Fresh and Bad
         if prev_was_fresh is True and not is_fresh:
             output_text += "\n"
             
@@ -274,7 +270,6 @@ def send_results(chat_id, user_id, results, loading_msg_id=None):
         try: bot.delete_message(chat_id, loading_msg_id)
         except: pass
 
-    # File output handling (Clean TXT)
     if pref == "file" or len(output_text) > 4000:
         fname = f"result_{user_id}_{int(time.time())}.txt"
         with open(fname, "w", encoding="utf-8") as f:
@@ -287,13 +282,10 @@ def send_results(chat_id, user_id, results, loading_msg_id=None):
                 is_fresh = ("✅" in status)
                 if file_prev_fresh is True and not is_fresh:
                     f.write("\n")
-                
-                # Clean text tags for file
                 if "✅" in status: c_status = "[FRESH]"
                 elif "🚫" in status: c_status = "[BANNED]"
                 elif "🔒" in status: c_status = "[LOCKED]"
                 else: c_status = "[REG]"
-                
                 f.write(f"{num}  {c_status}\n")
                 file_prev_fresh = is_fresh
                 
@@ -307,28 +299,25 @@ def process_user_buffer(user_id, chat_id):
     data = user_buffers.pop(user_id, None)
     if not data or not data['numbers']: return
     
-    # Remove duplicates but keep order
     seen = set()
     unique_numbers = [x for x in data['numbers'] if not (x in seen or seen.add(x))]
     total_needed = len(unique_numbers)
     
     if not deduct_points(user_id, total_needed):
-        bot.send_message(chat_id, f"❌ Not enough points!\nYou need {total_needed} points, but you have {get_points(user_id)}.")
+        bot.send_message(chat_id, f"❌ Not enough balance!\nNeed {total_needed}, have {get_points(user_id)}.")
         return
         
-    msg = bot.send_message(chat_id, f"🔍 Checking {total_needed} numbers... Please wait ⏳")
+    msg = bot.send_message(chat_id, f"🔍 Processing {total_needed} items...")
     results = bulk_check(unique_numbers)
     send_results(chat_id, user_id, results, msg.message_id)
 
 @bot.message_handler(content_types=['text'])
 def handle_text_numbers(message):
     if message.text.startswith('/') or message.text in ["👤 Profile", "💸 Send Points", "⚙️ Output Settings", "🎁 Daily Bonus"]: return
-    
     numbers = extract_numbers(message.text)
     if not numbers: return
     
     user_id = message.from_user.id
-    # Smart Batching Logic (Wait 2 seconds to merge multiple forwards)
     if user_id in user_buffers:
         user_buffers[user_id]['timer'].cancel()
         user_buffers[user_id]['numbers'].extend(numbers)
@@ -341,20 +330,20 @@ def handle_text_numbers(message):
 
 @bot.message_handler(content_types=['document'])
 def handle_docs(message):
-    if not message.document.file_name.endswith('.txt'): return bot.send_message(message.chat.id, "⚠️ Only `.txt` files.")
+    if not message.document.file_name.endswith('.txt'): return bot.send_message(message.chat.id, "⚠️ Only `.txt` files allowed.")
     try:
         content = bot.download_file(bot.get_file(message.document.file_id).file_path).decode('utf-8')
-        numbers = list(dict.fromkeys(extract_numbers(content))) # unique
+        numbers = list(dict.fromkeys(extract_numbers(content)))
         if not numbers: return bot.send_message(message.chat.id, "⚠️ No valid numbers found.")
         
         user_id, total_needed = message.from_user.id, len(numbers)
         if not deduct_points(user_id, total_needed):
-            return bot.send_message(message.chat.id, f"❌ Not enough points!\nNeed {total_needed}, have {get_points(user_id)}.")
+            return bot.send_message(message.chat.id, f"❌ Not enough balance!\nNeed {total_needed}, have {get_points(user_id)}.")
             
-        msg = bot.send_message(message.chat.id, f"📁 Processing {total_needed} numbers... ⏳")
+        msg = bot.send_message(message.chat.id, f"📁 Processing {total_needed} items...")
         send_results(message.chat.id, user_id, bulk_check(numbers), msg.message_id)
     except:
-        bot.send_message(message.chat.id, "⚠️ Error processing file.")
+        bot.send_message(message.chat.id, "⚠️ File processing error.")
 
 # --- RENDER WEB SERVER ---
 @app.route('/')
